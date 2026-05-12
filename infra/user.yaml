@@ -11,3 +11,7 @@ packages:
   - sudo
   - tcpdump
 
+runcmd:
+  - wget 'https://github.com/cilium/pwru/releases/latest/download/pwru-linux-amd64.tar.gz' -P /tmp
+  - tar xvf /tmp/pwru-linux-amd64.tar.gz && mv /tmp/pwru-linux-amd64.tar.gz
+  - sudo mv pwru /usr/local/bin

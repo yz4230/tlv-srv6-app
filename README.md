@@ -1,19 +1,21 @@
 # tlv-srv6-app
 
-SRv6 reserved-TLV service chain using eBPF LWT XMIT for the in-path services.
+SRv6 TLV service chain using eBPF LWT XMIT for the in-path services.
 
 Gateway encapsulation runs on `vm02` as a normal route installed by
-`ip-seg6-encap`. That route builds an SRH with 8 zeroed bytes reserved after
-the segment list. eBPF is used only for these two SIDs:
+`ip-seg6-encap`. That route builds an SRH with an 8-byte TLV area after the
+segment list: `type=252`, `len=1`, zero-filled value, and PadN. eBPF is used
+only for these two SIDs:
 
 - `vm03`: `fd00:a:3:0:8200::/80` -> `lwt_xmit/tlv_embedder`
 - `vm04`: `fd00:a:4:0:8300::/80` -> `lwt_xmit/tlv_selector`
 
-The Embedder reads the first 16 bits of the active SID ARG and writes `0` for a
-zero ARG or `1` for a non-zero ARG into the first reserved byte. The Selector
-reads that byte, clears all 8 reserved bytes before the packet leaves `vm04`,
-and advances one segment for value `0`, or two segments for non-zero values to
-skip `vm07`.
+The Embedder reads the first 16 bits of the active SID ARG and rewrites the TLV
+value to `0` for a zero ARG or `1` for a non-zero ARG. The Selector validates
+that TLV, reads the value, and advances one segment for value `0`, or two
+segments for non-zero values to skip `vm07`. The TLV remains in the SRH after
+Selector processing. The remaining 5 bytes of the slot are encoded as a PadN TLV
+(`type=4,len=3`) so Linux SRH validation can walk the TLV area exactly.
 
 ## Requirements
 
@@ -59,7 +61,7 @@ vm01 -- vm02 -- vm03 -- vm04 -- vm05 -- vm06
 `make attach` uploads the BPF object to `vm03` and `vm04`, then installs only
 the Embedder and Selector SID routes.
 
-`make normal` installs this reserved-SRH encap route on `vm02`:
+`make normal` installs this TLV-initialized SRH encap route on `vm02`:
 
 ```text
 10.5.0.0/24 -> fd00:a:3:0:8200::,fd00:a:4:0:8300::,fd00:a:7::1,fd00:a:5::d4
@@ -68,7 +70,7 @@ the Embedder and Selector SID routes.
 The forward path is:
 
 ```text
-vm01 -> vm02(encap) -> vm03(Embedder writes 0) -> vm04(Selector reads 0) -> vm07 -> vm04 -> vm05(decap) -> vm06
+vm01 -> vm02(encap) -> vm03(Embedder writes TLV value 0) -> vm04(Selector reads 0) -> vm07 -> vm04 -> vm05(decap) -> vm06
 ```
 
 `make skip` installs the same segment list except the Embedder SID has a
@@ -81,7 +83,7 @@ non-zero ARG:
 The non-zero ARG causes the Selector to skip `vm07`:
 
 ```text
-vm01 -> vm02(encap) -> vm03(Embedder writes 1) -> vm04(Selector skips) -> vm05(decap) -> vm06
+vm01 -> vm02(encap) -> vm03(Embedder writes TLV value 1) -> vm04(Selector skips) -> vm05(decap) -> vm06
 ```
 
 Both scenarios send an ICMP echo request from `vm01` to `10.5.0.6` on `vm06`.

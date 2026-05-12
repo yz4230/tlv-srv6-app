@@ -12,7 +12,9 @@
 #define TLV_TRACE_SUCCESS 1
 #endif
 
-#define TLV_RESERVED_LEN 8
+#define TLV_HDR_VALUE_LEN 3
+#define TLV_VALUE_LEN 1
+#define TLV_APP_TYPE 252
 #define SRH_MAX_LEN 2048
 #define SVC_EMBEDDER 2
 #define SVC_SELECTOR 3
@@ -142,25 +144,25 @@ static __always_inline int advance_srh(struct __sk_buff *skb,
   return BPF_LWT_REROUTE;
 }
 
-static __always_inline int get_reserved_offset(struct __sk_buff *skb,
-                                               struct srh_view *view, __u8 svc,
-                                               __u32 *offset) {
+static __always_inline int get_tlv_offset(struct __sk_buff *skb,
+                                          struct srh_view *view, __u8 svc,
+                                          __u32 *offset) {
   void *data = (void *)(long)skb->data;
-  void *reserved;
+  void *tlv;
 
-  if (view->srh_len < view->tlv_rel + TLV_RESERVED_LEN) {
-    bpf_printk("tlv_svc=%u: missing reserved bytes srh_len=%u tlv_rel=%u",
-               svc, view->srh_len, view->tlv_rel);
+  if (view->srh_len < view->tlv_rel + TLV_HDR_VALUE_LEN) {
+    bpf_printk("tlv_svc=%u: missing app tlv srh_len=%u tlv_rel=%u", svc,
+               view->srh_len, view->tlv_rel);
     return -1;
   }
 
-  reserved = data + view->srh_off + view->tlv_rel;
-  if (reserved + TLV_RESERVED_LEN > (void *)(long)skb->data_end) {
-    bpf_printk("tlv_svc=%u: truncated reserved bytes", svc);
+  tlv = data + view->srh_off + view->tlv_rel;
+  if (tlv + TLV_HDR_VALUE_LEN > (void *)(long)skb->data_end) {
+    bpf_printk("tlv_svc=%u: truncated app tlv", svc);
     return -1;
   }
 
-  *offset = reserved - data;
+  *offset = tlv - data;
   return 0;
 }
 
@@ -170,6 +172,7 @@ int tlv_embedder(struct __sk_buff *skb) {
   void *data_end = (void *)(long)skb->data_end;
   struct ipv6hdr *ip6h;
   struct srh_view view;
+  __u8 tlv[TLV_HDR_VALUE_LEN];
   const __u16 *sid_words;
   __u32 offset;
   __u16 arg_head;
@@ -180,8 +183,18 @@ int tlv_embedder(struct __sk_buff *skb) {
   if (ret != 0)
     return ret > 0 ? BPF_OK : BPF_DROP;
 
-  if (get_reserved_offset(skb, &view, SVC_EMBEDDER, &offset) < 0)
+  if (get_tlv_offset(skb, &view, SVC_EMBEDDER, &offset) < 0)
     return BPF_DROP;
+
+  if (bpf_skb_load_bytes(skb, offset, tlv, sizeof(tlv)) < 0) {
+    bpf_printk("tlv_embedder: failed to read app tlv");
+    return BPF_DROP;
+  }
+
+  if (tlv[0] != TLV_APP_TYPE || tlv[1] != TLV_VALUE_LEN) {
+    bpf_printk("tlv_embedder: invalid tlv type=%u len=%u", tlv[0], tlv[1]);
+    return BPF_DROP;
+  }
 
   ip6h = data + view.ip6h_off;
   if ((void *)(ip6h + 1) > data_end) {
@@ -192,8 +205,8 @@ int tlv_embedder(struct __sk_buff *skb) {
   sid_words = (const __u16 *)ip6h->daddr.in6_u.u6_addr16;
   arg_head = bpf_ntohs(sid_words[5]);
   value = arg_head == 0 ? 0 : 1;
-  if (bpf_skb_store_bytes(skb, offset, &value, sizeof(value), 0) < 0) {
-    bpf_printk("tlv_embedder: failed to write reserved byte");
+  if (bpf_skb_store_bytes(skb, offset + 2, &value, sizeof(value), 0) < 0) {
+    bpf_printk("tlv_embedder: failed to write tlv value");
     return BPF_DROP;
   }
 
@@ -202,8 +215,8 @@ int tlv_embedder(struct __sk_buff *skb) {
 
 SEC("lwt_xmit/tlv_selector")
 int tlv_selector(struct __sk_buff *skb) {
-  __u8 cleanup[TLV_RESERVED_LEN] = {};
   struct srh_view view;
+  __u8 tlv[TLV_HDR_VALUE_LEN];
   __u32 offset;
   __u8 value;
   __u8 decrement;
@@ -213,19 +226,21 @@ int tlv_selector(struct __sk_buff *skb) {
   if (ret != 0)
     return ret > 0 ? BPF_OK : BPF_DROP;
 
-  if (get_reserved_offset(skb, &view, SVC_SELECTOR, &offset) < 0)
+  if (get_tlv_offset(skb, &view, SVC_SELECTOR, &offset) < 0)
     return BPF_DROP;
 
-  if (bpf_skb_load_bytes(skb, offset, &value, sizeof(value)) < 0) {
-    bpf_printk("tlv_selector: failed to read reserved byte");
+  if (bpf_skb_load_bytes(skb, offset, tlv, sizeof(tlv)) < 0) {
+    bpf_printk("tlv_selector: failed to read app tlv");
     return BPF_DROP;
   }
+
+  if (tlv[0] != TLV_APP_TYPE || tlv[1] != TLV_VALUE_LEN) {
+    bpf_printk("tlv_selector: invalid tlv type=%u len=%u", tlv[0], tlv[1]);
+    return BPF_DROP;
+  }
+
+  value = tlv[2];
   decrement = value == 0 ? 1 : 2;
-
-  if (bpf_skb_store_bytes(skb, offset, cleanup, sizeof(cleanup), 0) < 0) {
-    bpf_printk("tlv_selector: failed to clear reserved bytes");
-    return BPF_DROP;
-  }
 
   return advance_srh(skb, &view, decrement, SVC_SELECTOR, value);
 }
