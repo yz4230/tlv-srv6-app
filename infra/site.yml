@@ -1,0 +1,96 @@
+---
+- name: Configure static IP addresses
+  hosts: vms
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Bring up loopback
+      ansible.builtin.command:
+        cmd: ip link set lo up
+      changed_when: false
+
+    - name: Bring up network interfaces
+      ansible.builtin.command:
+        cmd: "ip link set {{ item.dev }} up"
+      loop: "{{ interfaces }}"
+      loop_control:
+        label: "{{ item.dev }}"
+      changed_when: false
+
+    - name: Assign IP addresses
+      ansible.builtin.command:
+        cmd: "ip addr replace {{ item.1 }} dev {{ item.0.dev }}"
+      loop: "{{ interfaces | subelements('addresses') }}"
+      loop_control:
+        label: "{{ item.0.dev }}: {{ item.1 }}"
+      changed_when: false
+
+- name: Configure kernel parameters
+  hosts: vms
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Set sysctl parameters
+      ansible.builtin.command:
+        cmd: "sysctl -w {{ item.key }}={{ item.value }}"
+      loop: "{{ sysctl_params | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      changed_when: false
+
+- name: Configure static routes
+  hosts: vms
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Configure IPv4 routes
+      ansible.builtin.command:
+        cmd: "ip route replace {{ item.dest }} via {{ item.via }} dev {{ item.dev }}"
+      loop: "{{ ipv4_routes | default([]) }}"
+      loop_control:
+        label: "{{ item.dest }} via {{ item.via }}"
+      changed_when: false
+
+    - name: Configure IPv6 routes
+      ansible.builtin.command:
+        cmd: "ip -6 route replace {{ item.dest }} via {{ item.via }} dev {{ item.dev }}"
+      loop: "{{ ipv6_routes | default([]) }}"
+      loop_control:
+        label: "{{ item.dest }} via {{ item.via }}"
+      changed_when: false
+
+- name: Configure SRv6 encapsulation routes
+  hosts: vms
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Configure SRv6 H.Encaps routes
+      ansible.builtin.command:
+        cmd: "ip route replace {{ item.dest }} encap seg6 mode encap segs {{ item.segs }} dev {{ item.dev }}"
+      loop: "{{ srv6_encap_routes | default([]) }}"
+      loop_control:
+        label: "H.Encaps {{ item.dest }}"
+      changed_when: false
+
+- name: Configure SRv6 local SIDs
+  hosts: vms
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Configure SRv6 End SIDs
+      ansible.builtin.command:
+        cmd: "ip -6 route replace {{ item.sid }}/128 encap seg6local action End dev {{ item.dev }}"
+      loop: "{{ srv6_end_sids | default([]) }}"
+      loop_control:
+        label: "End {{ item.sid }}"
+      changed_when: false
+
+    - name: Configure SRv6 End.DX4 local SIDs
+      ansible.builtin.command:
+        cmd: >-
+          ip -6 route replace {{ item.sid }}/128 encap seg6local action End.DX4
+          nh4 {{ item.nh4 }} dev {{ item.dev }}
+      loop: "{{ srv6_local_sids | default([]) }}"
+      loop_control:
+        label: "End.DX4 {{ item.sid }}"
+      changed_when: false

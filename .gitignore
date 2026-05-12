@@ -1,0 +1,21 @@
+# Build artifacts
+/build
+
+# Other projects for reference
+/2026-03-29
+/minimum-srv6-app
+/ip-seg6-encap
+
+# Terraform/libvirt runtime state
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/*.tfstate
+infra/*.tfstate.*
+infra/.terraform.tfstate.lock.info
+
+# Local VM artifacts
+infra/images/*.qcow2
+infra/id
+infra/id.pub
+infra/inventory.ini
+infra/ssh_config

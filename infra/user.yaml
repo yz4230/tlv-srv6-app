@@ -1,0 +1,13 @@
+#cloud-config
+ssh_authorized_keys:
+  - ${ssh_public_key}
+
+package_update: true
+packages:
+  - bpftool
+  - ca-certificates
+  - iproute2
+  - iputils-ping
+  - sudo
+  - tcpdump
+
