@@ -18,7 +18,7 @@ fi
 terraform init
 terraform apply -auto-approve -var "ssh_public_key=$(<id.pub)"
 
-for vm in vm01 vm02 vm03 vm04 vm05 vm06; do
+for vm in vm01 vm02 vm03 vm04 vm05 vm06 vm07; do
     virsh -c "${LIBVIRT_URI:-qemu:///system}" send-key "tlv-srv6-${vm}" --codeset xt 28 >/dev/null || true
 done
 

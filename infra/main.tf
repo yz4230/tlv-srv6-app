@@ -12,7 +12,7 @@ provider "libvirt" {
 
 locals {
   image_path = abspath("${path.module}/${var.image_path}")
-  networks   = { nw1 = {}, nw2 = {}, nw3 = {}, nw4 = {}, nw5 = {} }
+  networks   = { nw1 = {}, nw2 = {}, nw3 = {}, nw4 = {}, nw5 = {}, nw6 = {} }
   vms = {
     vm01 = {
       networks = ["nw1"]
@@ -21,7 +21,7 @@ locals {
       networks = ["nw1", "nw2"]
     }
     vm03 = {
-      networks = ["nw2", "nw3", "nw5"]
+      networks = ["nw6", "nw3", "nw5"]
     }
     vm04 = {
       networks = ["nw3", "nw4"]
@@ -31,6 +31,9 @@ locals {
     }
     vm06 = {
       networks = ["nw5"]
+    }
+    vm07 = {
+      networks = ["nw2", "nw6"]
     }
   }
 }

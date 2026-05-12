@@ -9,11 +9,19 @@ sysctl_params:
   net.ipv6.conf.enp2s0.seg6_enabled: "1"
 
 ipv6_routes:
+  - dest: "fd00:a:2::/48"
+    via: "fd00:5::3"
+    dev: enp2s0
+  - dest: "fd00:a:3::/48"
+    via: "fd00:5::3"
+    dev: enp2s0
   - dest: "fd00:a:4::/48"
+    via: "fd00:5::3"
+    dev: enp2s0
+  - dest: "fd00:a:7::/48"
     via: "fd00:5::3"
     dev: enp2s0
 
 srv6_end_sids:
   - sid: "fd00:a:6::1"
     dev: enp2s0
-

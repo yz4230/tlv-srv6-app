@@ -12,28 +12,10 @@
 #define TLV_TRACE_SUCCESS 1
 #endif
 
-#define TLV_TYPE 0x42
-#define TLV_LEN 1
-#define TLV_SLOT_LEN 8
-#define TLV_RESERVED_LEN 40
+#define TLV_RESERVED_LEN 8
 #define SRH_MAX_LEN 2048
-#define SVC_GATEWAY 1
 #define SVC_EMBEDDER 2
 #define SVC_SELECTOR 3
-
-struct tlv_slot {
-  __u8 type;
-  __u8 len;
-  __u8 value;
-  __u8 pad[5];
-};
-
-struct tlv_reserved {
-  __u8 type;
-  __u8 len;
-  __u8 value;
-  __u8 pad[TLV_RESERVED_LEN - 3];
-};
 
 struct srh_view {
   struct ipv6hdr *ip6h;
@@ -127,10 +109,7 @@ static __always_inline int advance_srh(struct __sk_buff *skb, __u8 decrement,
   view.ip6h->daddr = *segment;
 
 #if TLV_TRACE_SUCCESS
-  if (svc == SVC_GATEWAY) {
-    bpf_printk("tlv_gateway: value=%u decrement=%u next_sl=%u", trace_value,
-               decrement, next_index);
-  } else if (svc == SVC_EMBEDDER) {
+  if (svc == SVC_EMBEDDER) {
     bpf_printk("tlv_embedder: value=%u decrement=%u next_sl=%u", trace_value,
                decrement, next_index);
   } else if (svc == SVC_SELECTOR) {
@@ -142,77 +121,33 @@ static __always_inline int advance_srh(struct __sk_buff *skb, __u8 decrement,
   return BPF_LWT_REROUTE;
 }
 
-static __always_inline int get_tlv_slot(struct __sk_buff *skb,
-                                        struct srh_view *view, __u8 svc,
-                                        struct tlv_slot **slot) {
-  struct tlv_slot *tlv;
+static __always_inline int get_reserved_offset(struct __sk_buff *skb,
+                                               struct srh_view *view, __u8 svc,
+                                               __u32 *offset) {
+  void *data = (void *)(long)skb->data;
+  void *reserved;
 
-  if (view->srh_len < view->tlv_rel + TLV_SLOT_LEN) {
-    bpf_printk("tlv_svc=%u: missing reserved tlv slot srh_len=%u tlv_rel=%u",
+  if (view->srh_len < view->tlv_rel + TLV_RESERVED_LEN) {
+    bpf_printk("tlv_svc=%u: missing reserved bytes srh_len=%u tlv_rel=%u",
                svc, view->srh_len, view->tlv_rel);
     return -1;
   }
 
-  tlv = (struct tlv_slot *)((void *)view->srh + view->tlv_rel);
-  if ((void *)(tlv + 1) > (void *)(long)skb->data_end) {
-    bpf_printk("tlv_svc=%u: truncated tlv slot", svc);
+  reserved = (void *)view->srh + view->tlv_rel;
+  if (reserved + TLV_RESERVED_LEN > (void *)(long)skb->data_end) {
+    bpf_printk("tlv_svc=%u: truncated reserved bytes", svc);
     return -1;
   }
 
-  *slot = tlv;
+  *offset = reserved - data;
   return 0;
-}
-
-static __always_inline int validate_tlv_slot(struct tlv_slot *slot, __u8 svc) {
-  if (slot->type != TLV_TYPE || slot->len != TLV_LEN) {
-    bpf_printk("tlv_svc=%u: unexpected tlv type=%u len=%u", svc, slot->type,
-               slot->len);
-    return -1;
-  }
-
-  return 0;
-}
-
-SEC("lwt_xmit/tlv_gateway")
-int tlv_gateway(struct __sk_buff *skb) {
-  void *data_end = (void *)(long)skb->data_end;
-  struct tlv_reserved reserved = {
-      .type = TLV_TYPE,
-      .len = TLV_LEN,
-      .value = 0,
-  };
-  struct srh_view view;
-  struct tlv_slot *slot;
-  int ret;
-
-  ret = parse_srh(skb, &view, SVC_GATEWAY);
-  if (ret != 0)
-    return ret > 0 ? BPF_OK : BPF_DROP;
-
-  if (get_tlv_slot(skb, &view, SVC_GATEWAY, &slot) < 0)
-    return BPF_DROP;
-
-  if (view.srh_len < view.tlv_rel + sizeof(reserved)) {
-    bpf_printk("tlv_gateway: reserved TLV space too small srh_len=%u",
-               view.srh_len);
-    return BPF_DROP;
-  }
-  if ((void *)slot + sizeof(reserved) > data_end) {
-    bpf_printk("tlv_gateway: truncated reserved TLV space");
-    return BPF_DROP;
-  }
-
-  view.srh->flags &= ~SR6_FLAG1_HMAC;
-  __builtin_memcpy(slot, &reserved, sizeof(reserved));
-
-  return advance_srh(skb, 1, SVC_GATEWAY, 0);
 }
 
 SEC("lwt_xmit/tlv_embedder")
 int tlv_embedder(struct __sk_buff *skb) {
   struct srh_view view;
-  struct tlv_slot *slot;
   const __u16 *sid_words;
+  __u32 offset;
   __u16 arg_head;
   __u8 value;
   int ret;
@@ -221,29 +156,25 @@ int tlv_embedder(struct __sk_buff *skb) {
   if (ret != 0)
     return ret > 0 ? BPF_OK : BPF_DROP;
 
-  if (get_tlv_slot(skb, &view, SVC_EMBEDDER, &slot) < 0)
-    return BPF_DROP;
-
-  if (validate_tlv_slot(slot, SVC_EMBEDDER) < 0)
+  if (get_reserved_offset(skb, &view, SVC_EMBEDDER, &offset) < 0)
     return BPF_DROP;
 
   sid_words = (const __u16 *)view.ip6h->daddr.in6_u.u6_addr16;
   arg_head = bpf_ntohs(sid_words[5]);
   value = arg_head == 0 ? 0 : 1;
-  slot->value = value;
+  if (bpf_skb_store_bytes(skb, offset, &value, sizeof(value), 0) < 0) {
+    bpf_printk("tlv_embedder: failed to write reserved byte");
+    return BPF_DROP;
+  }
 
   return advance_srh(skb, 1, SVC_EMBEDDER, value);
 }
 
 SEC("lwt_xmit/tlv_selector")
 int tlv_selector(struct __sk_buff *skb) {
-  void *data_end = (void *)(long)skb->data_end;
-  struct tlv_reserved cleanup = {
-      .type = SR6_TLV_PADDING,
-      .len = TLV_RESERVED_LEN - 2,
-  };
+  __u8 cleanup[TLV_RESERVED_LEN] = {};
   struct srh_view view;
-  struct tlv_slot *slot;
+  __u32 offset;
   __u8 value;
   __u8 decrement;
   int ret;
@@ -252,21 +183,19 @@ int tlv_selector(struct __sk_buff *skb) {
   if (ret != 0)
     return ret > 0 ? BPF_OK : BPF_DROP;
 
-  if (get_tlv_slot(skb, &view, SVC_SELECTOR, &slot) < 0)
+  if (get_reserved_offset(skb, &view, SVC_SELECTOR, &offset) < 0)
     return BPF_DROP;
 
-  if (validate_tlv_slot(slot, SVC_SELECTOR) < 0)
-    return BPF_DROP;
-
-  value = slot->value;
-  decrement = value == 0 ? 1 : 2;
-
-  if (view.srh_len < view.tlv_rel + sizeof(cleanup) ||
-      (void *)slot + sizeof(cleanup) > data_end) {
-    bpf_printk("tlv_selector: truncated cleanup TLV space");
+  if (bpf_skb_load_bytes(skb, offset, &value, sizeof(value)) < 0) {
+    bpf_printk("tlv_selector: failed to read reserved byte");
     return BPF_DROP;
   }
-  __builtin_memcpy(slot, &cleanup, sizeof(cleanup));
+  decrement = value == 0 ? 1 : 2;
+
+  if (bpf_skb_store_bytes(skb, offset, cleanup, sizeof(cleanup), 0) < 0) {
+    bpf_printk("tlv_selector: failed to clear reserved bytes");
+    return BPF_DROP;
+  }
 
   return advance_srh(skb, decrement, SVC_SELECTOR, value);
 }

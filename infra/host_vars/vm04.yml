@@ -19,6 +19,12 @@ ipv6_routes:
   - dest: "fd00:a:3::/48"
     via: "fd00:3::3"
     dev: enp2s0
+  - dest: "fd00:a:7::/48"
+    via: "fd00:3::3"
+    dev: enp2s0
+  - dest: "fd00:a:6::/48"
+    via: "fd00:3::3"
+    dev: enp2s0
 
 srv6_local_sids:
   - sid: "fd00:a:4::d4"
