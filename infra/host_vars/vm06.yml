@@ -1,27 +1,9 @@
 interfaces:
   - dev: enp2s0
     addresses:
-      - "fd00:5::6/64"
+      - "10.5.0.6/24"
 
-sysctl_params:
-  net.ipv6.conf.all.forwarding: "1"
-  net.ipv6.conf.all.seg6_enabled: "1"
-  net.ipv6.conf.enp2s0.seg6_enabled: "1"
-
-ipv6_routes:
-  - dest: "fd00:a:2::/48"
-    via: "fd00:5::3"
-    dev: enp2s0
-  - dest: "fd00:a:3::/48"
-    via: "fd00:5::3"
-    dev: enp2s0
-  - dest: "fd00:a:4::/48"
-    via: "fd00:5::3"
-    dev: enp2s0
-  - dest: "fd00:a:7::/48"
-    via: "fd00:5::3"
-    dev: enp2s0
-
-srv6_end_sids:
-  - sid: "fd00:a:6::1"
+ipv4_routes:
+  - dest: "10.1.0.0/24"
+    via: "10.5.0.5"
     dev: enp2s0

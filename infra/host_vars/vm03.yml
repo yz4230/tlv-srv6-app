@@ -1,31 +1,27 @@
 interfaces:
   - dev: enp2s0
     addresses:
-      - "fd00:7::3/64"
+      - "fd00:2::3/64"
   - dev: enp3s0
     addresses:
       - "fd00:3::3/64"
-  - dev: enp4s0
-    addresses:
-      - "fd00:5::3/64"
 
 sysctl_params:
   net.ipv6.conf.all.forwarding: "1"
   net.ipv6.conf.all.seg6_enabled: "1"
   net.ipv6.conf.enp2s0.seg6_enabled: "1"
   net.ipv6.conf.enp3s0.seg6_enabled: "1"
-  net.ipv6.conf.enp4s0.seg6_enabled: "1"
 
 ipv6_routes:
   - dest: "fd00:a:2::/48"
-    via: "fd00:7::7"
-    dev: enp2s0
-  - dest: "fd00:a:7::/48"
-    via: "fd00:7::7"
+    via: "fd00:2::2"
     dev: enp2s0
   - dest: "fd00:a:4::/48"
     via: "fd00:3::4"
     dev: enp3s0
-  - dest: "fd00:a:6::/48"
-    via: "fd00:5::6"
-    dev: enp4s0
+  - dest: "fd00:a:5::/48"
+    via: "fd00:3::4"
+    dev: enp3s0
+  - dest: "fd00:a:7::/48"
+    via: "fd00:3::4"
+    dev: enp3s0

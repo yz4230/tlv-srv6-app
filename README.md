@@ -6,14 +6,14 @@ Gateway encapsulation runs on `vm02` as a normal route installed by
 `ip-seg6-encap`. That route builds an SRH with 8 zeroed bytes reserved after
 the segment list. eBPF is used only for these two SIDs:
 
-- `vm07`: `fd00:a:7:0:8200::/80` -> `lwt_xmit/tlv_embedder`
-- `vm03`: `fd00:a:3:0:8300::/80` -> `lwt_xmit/tlv_selector`
+- `vm03`: `fd00:a:3:0:8200::/80` -> `lwt_xmit/tlv_embedder`
+- `vm04`: `fd00:a:4:0:8300::/80` -> `lwt_xmit/tlv_selector`
 
 The Embedder reads the first 16 bits of the active SID ARG and writes `0` for a
 zero ARG or `1` for a non-zero ARG into the first reserved byte. The Selector
-reads that byte, clears all 8 reserved bytes before the packet leaves `vm03`,
+reads that byte, clears all 8 reserved bytes before the packet leaves `vm04`,
 and advances one segment for value `0`, or two segments for non-zero values to
-skip `vm06`.
+skip `vm07`.
 
 ## Requirements
 
@@ -51,57 +51,57 @@ make down
 The VM topology is managed under `infra/` with Terraform and Ansible:
 
 ```text
-vm01 -- vm02 -- vm07 -- vm03 -- vm04 -- vm05
+vm01 -- vm02 -- vm03 -- vm04 -- vm05 -- vm06
                          |
-                        vm06
+                        vm07
 ```
 
-`make attach` uploads the BPF object to `vm07` and `vm03`, then installs only
+`make attach` uploads the BPF object to `vm03` and `vm04`, then installs only
 the Embedder and Selector SID routes.
 
 `make normal` installs this reserved-SRH encap route on `vm02`:
 
 ```text
-10.4.0.0/24 -> fd00:a:7:0:8200::,fd00:a:3:0:8300::,fd00:a:6::1,fd00:a:4::d4
+10.5.0.0/24 -> fd00:a:3:0:8200::,fd00:a:4:0:8300::,fd00:a:7::1,fd00:a:5::d4
 ```
 
 The forward path is:
 
 ```text
-vm01 -> vm02(encap) -> vm07(Embedder writes 0) -> vm03(Selector reads 0) -> vm06 -> vm03 -> vm04(decap) -> vm05
+vm01 -> vm02(encap) -> vm03(Embedder writes 0) -> vm04(Selector reads 0) -> vm07 -> vm04 -> vm05(decap) -> vm06
 ```
 
 `make skip` installs the same segment list except the Embedder SID has a
 non-zero ARG:
 
 ```text
-10.4.0.0/24 -> fd00:a:7:0:8200:1::,fd00:a:3:0:8300::,fd00:a:6::1,fd00:a:4::d4
+10.5.0.0/24 -> fd00:a:3:0:8200:1::,fd00:a:4:0:8300::,fd00:a:7::1,fd00:a:5::d4
 ```
 
-The non-zero ARG causes the Selector to skip `vm06`:
+The non-zero ARG causes the Selector to skip `vm07`:
 
 ```text
-vm01 -> vm02(encap) -> vm07(Embedder writes 1) -> vm03(Selector skips) -> vm04(decap) -> vm05
+vm01 -> vm02(encap) -> vm03(Embedder writes 1) -> vm04(Selector skips) -> vm05(decap) -> vm06
 ```
 
-Both scenarios send an ICMP echo request from `vm01` to `10.4.0.5` on `vm05`.
+Both scenarios send an ICMP echo request from `vm01` to `10.5.0.6` on `vm06`.
 
 ## Checks
 
-Run tcpdump on `vm06` in another terminal before each scenario:
+Run tcpdump on `vm07` in another terminal before each scenario:
 
 ```bash
-make tcpdump-vm06
+make tcpdump-vm07
 ```
 
-`make normal` should capture a packet destined for `fd00:a:6::1`. `make skip`
+`make normal` should capture a packet destined for `fd00:a:7::1`. `make skip`
 should not capture one; use a timeout for that negative check:
 
 ```bash
-timeout 3 make tcpdump-vm06
+timeout 3 make tcpdump-vm07
 ```
 
-Trace logs are available from `vm03`:
+Trace logs are available from `vm03` and `vm04`:
 
 ```bash
 make tracelog
@@ -118,7 +118,7 @@ No `tlv_gateway` log should appear.
 
 ## Runtime Measurements
 
-The old `bpf_stats` and `vm03_overhead` workflows from `minimum-srv6-app` are
+The old `bpf_stats` and `vm04_overhead` workflows from `minimum-srv6-app` are
 not supported in this version. The current milestone is functional TLV service
 chaining and normal/skip connectivity.
 

@@ -4,13 +4,17 @@ interfaces:
       - "fd00:3::4/64"
   - dev: enp3s0
     addresses:
-      - "10.4.0.4/24"
+      - "fd00:4::4/64"
+  - dev: enp4s0
+    addresses:
+      - "fd00:7::4/64"
 
 sysctl_params:
-  net.ipv4.ip_forward: "1"
   net.ipv6.conf.all.forwarding: "1"
   net.ipv6.conf.all.seg6_enabled: "1"
   net.ipv6.conf.enp2s0.seg6_enabled: "1"
+  net.ipv6.conf.enp3s0.seg6_enabled: "1"
+  net.ipv6.conf.enp4s0.seg6_enabled: "1"
 
 ipv6_routes:
   - dest: "fd00:a:2::/48"
@@ -19,19 +23,9 @@ ipv6_routes:
   - dest: "fd00:a:3::/48"
     via: "fd00:3::3"
     dev: enp2s0
-  - dest: "fd00:a:7::/48"
-    via: "fd00:3::3"
-    dev: enp2s0
-  - dest: "fd00:a:6::/48"
-    via: "fd00:3::3"
-    dev: enp2s0
-
-srv6_local_sids:
-  - sid: "fd00:a:4::d4"
-    nh4: "10.4.0.5"
+  - dest: "fd00:a:5::/48"
+    via: "fd00:4::5"
     dev: enp3s0
-
-srv6_encap_routes:
-  - dest: "10.1.0.0/24"
-    segs: "fd00:a:2::d4"
-    dev: enp2s0
+  - dest: "fd00:a:7::/48"
+    via: "fd00:7::7"
+    dev: enp4s0

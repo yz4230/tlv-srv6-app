@@ -16,14 +16,14 @@
 
 - `make build` compiles `src/srv6_tlv.c` to `build/srv6_tlv.bpf.o`.
 - `make clean` removes generated build artifacts.
-- `make up` provisions/configures the six-VM SRv6 topology.
-- `make attach` builds and attaches the Gateway, Embedder, and Selector BPF SIDs
-  on `vm03`.
-- `make normal` runs the path that should traverse `vm06`.
-- `make skip` runs the path that should skip `vm06`.
-- `make tcpdump-vm06` captures packets on `vm06`; use `timeout 3 make tcpdump-vm06`
+- `make up` provisions/configures the seven-VM SRv6 topology.
+- `make attach` builds and attaches the Embedder and Selector BPF SIDs on
+  `vm03` and `vm04`.
+- `make normal` runs the path that should traverse `vm07`.
+- `make skip` runs the path that should skip `vm07`.
+- `make tcpdump-vm07` captures packets on `vm07`; use `timeout 3 make tcpdump-vm07`
   when validating the skip case.
-- `make tracelog` reads BPF trace output from `vm03`.
+- `make tracelog` reads BPF trace output from `vm03` and `vm04`.
 - `make down` tears down the VM environment.
 
 ## Coding Style & Naming Conventions
@@ -47,7 +47,7 @@ There is no standalone unit test suite. Validate changes with:
 4. `make normal`
 5. `make skip`
 
-For behavior changes, confirm packet paths with `make tcpdump-vm06` and inspect
+For behavior changes, confirm packet paths with `make tcpdump-vm07` and inspect
 BPF logs with `make tracelog`. Include commands run and observed results in PR
 notes.
 

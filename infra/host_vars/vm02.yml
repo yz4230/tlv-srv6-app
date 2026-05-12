@@ -13,17 +13,17 @@ sysctl_params:
   net.ipv6.conf.enp3s0.seg6_enabled: "1"
 
 ipv6_routes:
-  - dest: "fd00:a:7::/48"
-    via: "fd00:2::7"
-    dev: enp3s0
   - dest: "fd00:a:3::/48"
-    via: "fd00:2::7"
+    via: "fd00:2::3"
     dev: enp3s0
   - dest: "fd00:a:4::/48"
-    via: "fd00:2::7"
+    via: "fd00:2::3"
     dev: enp3s0
-  - dest: "fd00:a:6::/48"
-    via: "fd00:2::7"
+  - dest: "fd00:a:5::/48"
+    via: "fd00:2::3"
+    dev: enp3s0
+  - dest: "fd00:a:7::/48"
+    via: "fd00:2::3"
     dev: enp3s0
 
 srv6_local_sids:
