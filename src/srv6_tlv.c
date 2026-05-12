@@ -18,10 +18,12 @@
 #define SVC_SELECTOR 3
 
 struct srh_view {
-  struct ipv6hdr *ip6h;
-  struct ipv6_sr_hdr *srh;
+  __u32 ip6h_off;
+  __u32 srh_off;
   __u32 srh_len;
   __u32 tlv_rel;
+  __u8 first_segment;
+  __u8 segments_left;
 };
 
 static __always_inline int parse_srh(struct __sk_buff *skb,
@@ -68,45 +70,64 @@ static __always_inline int parse_srh(struct __sk_buff *skb,
     return -1;
   }
 
-  view->ip6h = ip6h;
-  view->srh = srh;
+  view->ip6h_off = 0;
+  view->srh_off = sizeof(*ip6h);
   view->srh_len = srh_len;
   view->tlv_rel = tlv_rel;
+  view->first_segment = srh->first_segment;
+  view->segments_left = srh->segments_left;
   return 0;
 }
 
-static __always_inline int advance_srh(struct __sk_buff *skb, __u8 decrement,
-                                       __u8 svc, __u8 trace_value) {
-  struct srh_view view;
+static __always_inline int advance_srh(struct __sk_buff *skb,
+                                       const struct srh_view *view,
+                                       __u8 decrement, __u8 svc,
+                                       __u8 trace_value) {
+  void *data = (void *)(long)skb->data;
+  void *data_end = (void *)(long)skb->data_end;
+  struct ipv6hdr *ip6h;
+  struct ipv6_sr_hdr *srh;
   struct in6_addr *segment;
   __u8 next_index;
-  int ret;
 
-  ret = parse_srh(skb, &view, svc);
-  if (ret != 0)
-    return ret > 0 ? BPF_OK : BPF_DROP;
+  ip6h = data + view->ip6h_off;
+  if ((void *)(ip6h + 1) > data_end) {
+    bpf_printk("tlv_svc=%u: truncated ipv6 header on advance", svc);
+    return BPF_DROP;
+  }
 
-  if (view.srh->segments_left < decrement) {
+  srh = data + view->srh_off;
+  if ((void *)(srh + 1) > data_end) {
+    bpf_printk("tlv_svc=%u: truncated srh fixed header on advance", svc);
+    return BPF_DROP;
+  }
+
+  if ((void *)srh + view->srh_len > data_end) {
+    bpf_printk("tlv_svc=%u: truncated srh on advance", svc);
+    return BPF_DROP;
+  }
+
+  if (view->segments_left < decrement) {
     bpf_printk("tlv_svc=%u: segments_left=%u decrement=%u drop", svc,
-               view.srh->segments_left, decrement);
+               view->segments_left, decrement);
     return BPF_DROP;
   }
 
-  next_index = view.srh->segments_left - decrement;
-  if (next_index > view.srh->first_segment) {
+  next_index = view->segments_left - decrement;
+  if (next_index > view->first_segment) {
     bpf_printk("tlv_svc=%u: next_index=%u first_segment=%u drop", svc,
-               next_index, view.srh->first_segment);
+               next_index, view->first_segment);
     return BPF_DROP;
   }
 
-  segment = view.srh->segments + next_index;
+  segment = (void *)srh + sizeof(*srh) + next_index * sizeof(*segment);
   if ((void *)(segment + 1) > (void *)(long)skb->data_end) {
     bpf_printk("tlv_svc=%u: truncated segment index=%u", svc, next_index);
     return BPF_DROP;
   }
 
-  view.srh->segments_left = next_index;
-  view.ip6h->daddr = *segment;
+  srh->segments_left = next_index;
+  ip6h->daddr = *segment;
 
 #if TLV_TRACE_SUCCESS
   if (svc == SVC_EMBEDDER) {
@@ -133,7 +154,7 @@ static __always_inline int get_reserved_offset(struct __sk_buff *skb,
     return -1;
   }
 
-  reserved = (void *)view->srh + view->tlv_rel;
+  reserved = data + view->srh_off + view->tlv_rel;
   if (reserved + TLV_RESERVED_LEN > (void *)(long)skb->data_end) {
     bpf_printk("tlv_svc=%u: truncated reserved bytes", svc);
     return -1;
@@ -145,6 +166,9 @@ static __always_inline int get_reserved_offset(struct __sk_buff *skb,
 
 SEC("lwt_xmit/tlv_embedder")
 int tlv_embedder(struct __sk_buff *skb) {
+  void *data = (void *)(long)skb->data;
+  void *data_end = (void *)(long)skb->data_end;
+  struct ipv6hdr *ip6h;
   struct srh_view view;
   const __u16 *sid_words;
   __u32 offset;
@@ -159,7 +183,13 @@ int tlv_embedder(struct __sk_buff *skb) {
   if (get_reserved_offset(skb, &view, SVC_EMBEDDER, &offset) < 0)
     return BPF_DROP;
 
-  sid_words = (const __u16 *)view.ip6h->daddr.in6_u.u6_addr16;
+  ip6h = data + view.ip6h_off;
+  if ((void *)(ip6h + 1) > data_end) {
+    bpf_printk("tlv_embedder: truncated ipv6 header before read");
+    return BPF_DROP;
+  }
+
+  sid_words = (const __u16 *)ip6h->daddr.in6_u.u6_addr16;
   arg_head = bpf_ntohs(sid_words[5]);
   value = arg_head == 0 ? 0 : 1;
   if (bpf_skb_store_bytes(skb, offset, &value, sizeof(value), 0) < 0) {
@@ -167,7 +197,7 @@ int tlv_embedder(struct __sk_buff *skb) {
     return BPF_DROP;
   }
 
-  return advance_srh(skb, 1, SVC_EMBEDDER, value);
+  return advance_srh(skb, &view, 1, SVC_EMBEDDER, value);
 }
 
 SEC("lwt_xmit/tlv_selector")
@@ -197,7 +227,7 @@ int tlv_selector(struct __sk_buff *skb) {
     return BPF_DROP;
   }
 
-  return advance_srh(skb, decrement, SVC_SELECTOR, value);
+  return advance_srh(skb, &view, decrement, SVC_SELECTOR, value);
 }
 
 char _license[] SEC("license") = "GPL";
