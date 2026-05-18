@@ -1,0 +1,3 @@
+[submodule "ip-seg6-encap"]
+	path = ip-seg6-encap
+	url = git@github.com:yz4230/ip-seg6-encap.git
